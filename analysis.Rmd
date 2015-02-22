@@ -1,0 +1,119 @@
+---
+title: "Predicting Type of Excercise"
+author: "Steve Kaeser"
+date: "Sunday, February 22, 2015"
+output: html_document
+---
+
+## Purpose
+
+This document describes the analysis done to use machine learning for predicting the value of the "classe" variable in the Weight Lifting Exercise dataset.
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+## Data 
+
+The training data for this project are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+```{r}
+library(AppliedPredictiveModeling)
+library(caret)
+library(randomForest)
+
+# Download data.
+remoteFile <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+tempDir <- tempdir()
+tempTrain <- tempfile(tmpdir=tempDir, fileext=".csv")
+download.file(remoteFile,tempTrain)
+
+remoteFile <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+tempDir <- tempdir()
+tempTest <- tempfile(tmpdir=tempDir, fileext=".csv")
+download.file(remoteFile,tempTest)
+
+# Import the data treating empty values as NA.
+training <- read.csv(tempTrain, na.strings=c("NA",""), header=TRUE)
+validation <- read.csv(tempTest, na.strings=c("NA",""), header=TRUE)
+```
+
+## Simple Analysis
+
+For validation purposes, the column names of both the training and validation datasets are compared to make sure they are the same.
+
+```{r}
+trainingCols <- names(training)
+validationCols <- names(validation)
+all.equal(trainingCols[1:length(trainingCols)-1], validationCols[1:length(validationCols)-1])
+```
+
+## Data Transformation
+
+To make analysis of the data cleaner, the first 7 columns ("X","user\_name","raw\_timestamp\_part\_1","raw\_timestamp\_part\_2","cvtd\_timestamp","new\_window","num\_window") and all columns with NA values are removed.
+
+```{r}
+numColumns <- as.vector(apply(training, 2, function(x) length(which(!is.na(x)))))
+columnsToDelete <- c()
+for (cnt in 1:length(numColumns)) {
+  if (numColumns[cnt] < nrow(training)) {
+    columnsToDelete <- c(columnsToDelete, trainingCols[cnt])
+  }
+}
+
+training <- training[,!(names(training) %in% columnsToDelete)]
+training <- training[,8:length(colnames(training))]
+
+validation <- validation[,!(names(validation) %in% columnsToDelete)]
+validation <- validation[,8:length(colnames(validation))]
+```
+
+## Random Forests For Prediction
+
+In order to do cross validation, the first step is to split the full training set into 2 sets using createDataParitition.  Once the data is partitioned, the randomForest function is called to create the prediction model.
+
+```{r}
+set.seed(1975)
+
+inTrain <- createDataPartition(y=training$classe,p=0.7,list=FALSE)
+smallTraining <- training[inTrain,]
+testing <- training[-inTrain,]
+
+fit <- randomForest(smallTraining$classe ~ ., preProcess=c("center", "scale"), data=smallTraining)
+print(fit, digits=3)
+```
+
+## Check Prediction Against the Testing Set
+
+After generating the model, we use it to predict the classe variable in the testing data set and determine how well our model is doing.
+
+```{r}
+predictions <- predict(fit, newdata=testing)
+cMatrix <- confusionMatrix(predictions, testing$classe)
+print(cMatrix, digits=4)
+```
+
+## Conclusion Of the Analysis
+
+Based on the results of the cross validation, the out of sample error would be:
+
+1 - `r cMatrix$overall[1]` = `r 1-cMatrix$overall[1]`
+
+This shows that this is a very good prediction model for determining the value of "classe".
+
+## Print Files of Predictions from the Validation Set
+
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+answers <- predict(fit, newdata=validation)
+pml_write_files(answers)
+```
